@@ -8,6 +8,7 @@
 #include "Legacy2Aidl.h"
 #include "Session.h"
 #include "VendorConstants.h"
+#include "TimedRestore.h"
 
 #include <fingerprint.sysprop.h>
 
@@ -16,7 +17,9 @@
 #include <dirent.h>
 #include <endian.h>
 #include <thread>
+#define B_PATH "/sys/class/backlight/panel/brightness"
 
+std::shared_ptr<TimedRestore> BrightnessRestore = nullptr;
 using namespace ::android::fingerprint::samsung;
 using namespace ::std::chrono_literals;
 
@@ -222,6 +225,12 @@ ndk::ScopedAStatus Session::onPointerDown(int32_t /*pointerId*/, int32_t /*x*/, 
                                           float /*major*/) {
     LOG(INFO) << "onPointerDown";
 
+    std::string sensorTypeProp = FingerprintHalProperties::type().value_or("");
+    if (sensorTypeProp == "udfps_optical") {
+	BrightnessRestore = std::make_shared<TimedRestore>(B_PATH);
+	BrightnessRestore->set("300");
+    }
+
     if (FingerprintHalProperties::request_touch_event().value_or(false)) {
         mHal.request(SEM_REQUEST_TOUCH_EVENT, 2);
     }
@@ -232,6 +241,11 @@ ndk::ScopedAStatus Session::onPointerDown(int32_t /*pointerId*/, int32_t /*x*/, 
 
 ndk::ScopedAStatus Session::onPointerUp(int32_t /*pointerId*/) {
     LOG(INFO) << "onPointerUp";
+
+    std::string sensorTypeProp = FingerprintHalProperties::type().value_or("");
+    if (sensorTypeProp == "udfps_optical") {
+        BrightnessRestore = nullptr;
+    }
 
     if (FingerprintHalProperties::request_touch_event().value_or(false)) {
         mHal.request(SEM_REQUEST_TOUCH_EVENT, 1);
@@ -287,6 +301,11 @@ ndk::ScopedAStatus Session::setIgnoreDisplayTouches(bool /*shouldIgnore*/) {
 
 ndk::ScopedAStatus Session::cancel() {
     int32_t ret = mHal.ss_fingerprint_cancel();
+
+    std::string sensorTypeProp = FingerprintHalProperties::type().value_or("");
+    if (sensorTypeProp == "udfps_optical") {
+    BrightnessRestore = nullptr;
+    }
 
     if (ret == 0) {
         mCb->onError(Error::CANCELED, 0 /* vendorCode */);
@@ -457,6 +476,10 @@ void Session::notify(const fingerprint_msg_t* msg) {
 
                 if (mUdfpsHandler) {
                     mUdfpsHandler->setFodPress(false);
+                }
+                std::string sensorTypeProp = FingerprintHalProperties::type().value_or("");
+                if (sensorTypeProp == "udfps_optical") {
+                BrightnessRestore = nullptr;
                 }
                 mCb->onAuthenticationSucceeded(msg->data.authenticated.finger.fid, authToken);
                 mLockoutTracker.reset(true);
